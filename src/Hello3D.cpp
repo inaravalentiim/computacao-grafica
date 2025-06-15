@@ -23,6 +23,8 @@ using namespace std;
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 // Protótipo da função de callback de teclado
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -30,31 +32,37 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 // Protótipos das funções
 int setupShader();
 int setupGeometry();
+GLuint loadTexture(std::string filePath, int &width, int &height);
 
 // Dimensões da janela (pode ser alterado em tempo de execução)
 const GLuint WIDTH = 1000, HEIGHT = 1000;
 
 // Código fonte do Vertex Shader (em GLSL): ainda hardcoded
-const GLchar* vertexShaderSource = "#version 450\n"
-"layout (location = 0) in vec3 position;\n"
-"layout (location = 1) in vec3 color;\n"
-"uniform mat4 model;\n"
-"out vec4 finalColor;\n"
-"void main()\n"
-"{\n"
-//...pode ter mais linhas de código aqui!
-"gl_Position = model * vec4(position, 1.0);\n"
-"finalColor = vec4(color, 1.0);\n"
-"}\0";
+const GLchar* vertexShaderSource = R"(
+	#version 450
+	layout(location = 0) in vec3 position;
+	layout(location = 1) in vec2 texc;
+	uniform mat4 projection;
+	uniform mat4 model;
+	out vec2 texCoord;
+	void main()
+	{
+		gl_Position = projection * model * vec4(position, 1.0);
+		texCoord = texc;
+	}
+	)";
 
 //Códifo fonte do Fragment Shader (em GLSL): ainda hardcoded
-const GLchar* fragmentShaderSource = "#version 450\n"
-"in vec4 finalColor;\n"
-"out vec4 color;\n"
-"void main()\n"
-"{\n"
-"color = finalColor;\n"
-"}\n\0";
+const GLchar* fragmentShaderSource = R"(
+	#version 450
+	in vec2 texCoord;
+	uniform sampler2D texBuff;
+	out vec4 color;
+	void main()
+	{
+		color = texture(texBuff, texCoord);
+	}
+	)";
 
 bool rotateX=false, rotateY=false, rotateZ=false;
 int direction=1;
@@ -90,7 +98,6 @@ int main()
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
 	{
 		std::cout << "Failed to initialize GLAD" << std::endl;
-
 	}
 
 	// Obtendo as informações de versão
@@ -104,25 +111,42 @@ int main()
 	glfwGetFramebufferSize(window, &width, &height);
 	glViewport(0, 0, width, height);
 
-
 	// Compilando e buildando o programa de shader
 	GLuint shaderID = setupShader();
 
-	// Gerando um buffer simples, com a geometria de um triângulo
+	// Gerando um buffer simples, com a geometria de um cubo
 	GLuint VAO = setupGeometry();
 
+	int imgWidth, imgHeight;
+	GLuint textID = loadTexture("../assets/tex/pixelWall.png", imgWidth, imgHeight);
 
 	glUseProgram(shaderID);
 
-	glm::mat4 model = glm::mat4(1); //matriz identidade;
+    // binding da textura
+    glUniform1i(glGetUniformLocation(shaderID, "texBuff"), 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture  (GL_TEXTURE_2D, textID);
+
+    // envia projection
+    GLint projLoc = glGetUniformLocation(shaderID, "projection");
+    glm::mat4 projection = glm::perspective(
+        glm::radians(45.0f),
+        (float)WIDTH / (float)HEIGHT,
+        0.1f, 100.0f
+    );
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+    // prepara modelLoc
+	glm::mat4 model = glm::mat4(1.0f); // matriz identidade
+    // afasta o cubo da câmera
+    model = glm::translate(model, glm::vec3(0.0f, 0.0f, -3.0f));
 	GLint modelLoc = glGetUniformLocation(shaderID, "model");
 	//
 	model = glm::scale(model, glm::vec3(scale, scale, scale));
-	model = glm::rotate(model, /*(GLfloat)glfwGetTime()*/glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+	model = glm::rotate(model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 	glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
 	glEnable(GL_DEPTH_TEST);
-
 
 	// Loop da aplicação - "game loop"
 	while (!glfwWindowShouldClose(window))
@@ -131,7 +155,7 @@ int main()
 		glfwPollEvents();
 
 		// Limpa o buffer de cor
-		glClearColor(1.0f, 1.0f, 1.0f, 1.0f); //cor de fundo
+		glClearColor(1.0f, 1.0f, 1.0f, 1.0f); // cor de fundo
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		glLineWidth(10);
@@ -139,59 +163,52 @@ int main()
 
 		float angle = (GLfloat)glfwGetTime();
 
-		model = glm::mat4(1);
+		model = glm::mat4(1.0f);
+        model = glm::translate(model, glm::vec3(0.0f, 0.0f, -3.0f));
 		model = glm::scale(model, glm::vec3(scale));
 		
-		if (rotateX and direction == 1)
-		{
+		if (rotateX && direction == 1)
 			model = glm::rotate(model, angle, glm::vec3(1.0f, 0.0f, 0.0f));
-			
-		}
-		else if (rotateX and direction == -1)
-		{
+		else if (rotateX && direction == -1)
 			model = glm::rotate(model, -angle, glm::vec3(1.0f, 0.0f, 0.0f));
-			
-		}
-		else if (rotateY and direction == 1)
-		{
+		else if (rotateY && direction == 1)
 			model = glm::rotate(model, angle, glm::vec3(0.0f, 1.0f, 0.0f));
-
-		}
-		else if(rotateY and direction == -1)
-		{
+		else if (rotateY && direction == -1)
 			model = glm::rotate(model, -angle, glm::vec3(0.0f, 1.0f, 0.0f));
-		}
-		else if (rotateZ and direction == 1)
-		{
+		else if (rotateZ && direction == 1)
 			model = glm::rotate(model, angle, glm::vec3(0.0f, 0.0f, 1.0f));
-
-		}
-		else if (rotateZ and direction == -1)
-		{
+		else if (rotateZ && direction == -1)
 			model = glm::rotate(model, -angle, glm::vec3(0.0f, 0.0f, 1.0f));
-		}
 
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+		
 		// Chamada de desenho - drawcall
 		// Poligono Preenchido - GL_TRIANGLES
-		
 		glBindVertexArray(VAO);
+		glBindTexture(GL_TEXTURE_2D, textID);
 		glDrawArrays(GL_TRIANGLES, 0, 36);
 
 		// Chamada de desenho - drawcall
-		// CONTORNO - GL_LINE_LOOP
-		
+		// CONTORNO - GL_POINTS
 		glDrawArrays(GL_POINTS, 0, 36);
 		glBindVertexArray(0);
 
 		glm::mat4 model2 = glm::mat4(1.0f);
-		model2 = glm::translate(model2, glm::vec3(1.5f, 0.0f, 0.0f));
+		model2 = glm::translate(model2, glm::vec3(1.5f, 0.0f, -3.0f));
 		model2 = glm::scale(model2, glm::vec3(scale));
 
-		if (rotateY && direction == 1)
+		 if (rotateX && direction == 1)
+     		model2 = glm::rotate(model2, angle, glm::vec3(1.0f, 0.0f, 0.0f));
+		else if (rotateX && direction == -1)
+			model2 = glm::rotate(model2, -angle, glm::vec3(1.0f, 0.0f, 0.0f));
+		else if (rotateY && direction == 1)
 			model2 = glm::rotate(model2, angle, glm::vec3(0.0f, 1.0f, 0.0f));
 		else if (rotateY && direction == -1)
 			model2 = glm::rotate(model2, -angle, glm::vec3(0.0f, 1.0f, 0.0f));
+		else if (rotateZ && direction == 1)
+			model2 = glm::rotate(model2, angle, glm::vec3(0.0f, 0.0f, 1.0f));
+		else if (rotateZ && direction == -1)
+			model2 = glm::rotate(model2, -angle, glm::vec3(0.0f, 0.0f, 1.0f));
 
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model2));
 
@@ -223,7 +240,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		rotateX = true;
 		rotateY = false;
 		rotateZ = false;
-		direction = 1;
+		direction = -1;
 	}
 
 	if (key == GLFW_KEY_A && action == GLFW_PRESS)
@@ -231,7 +248,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		rotateX = false;
 		rotateY = true;
 		rotateZ = false;
-		direction = 1;
+		direction = -1;
 	}
 
 	if (key == GLFW_KEY_S && action == GLFW_PRESS)
@@ -239,7 +256,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		rotateX = true;
 		rotateY = false;
 		rotateZ = false;
-		direction = -1;
+		direction = 1;
 	}
 
 	if (key == GLFW_KEY_D && action == GLFW_PRESS)
@@ -247,7 +264,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		rotateX = false;
 		rotateY = true;
 		rotateZ = false;
-		direction = -1;
+		direction = 1;
 	}
 
 	if (key == GLFW_KEY_F && action == GLFW_PRESS)
@@ -266,10 +283,10 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		direction = -1;
 	}	
 
-	if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
+	if (key == GLFW_KEY_E && action == GLFW_PRESS) {
 		scale += 0.1f;
 	}
-	if (key == GLFW_KEY_E && action == GLFW_PRESS) {
+	if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
 		scale -= 0.1f;
 		if (scale < 0.1f)
 			scale = 0.1f;
@@ -324,61 +341,61 @@ int setupShader()
 	return shaderProgram;
 }
 
-// Esta função está bastante harcoded - objetivo é criar os buffers que armazenam a 
-// geometria de um triângulo
-// Apenas atributo coordenada nos vértices
-// 1 VBO com as coordenadas, VAO com apenas 1 ponteiro para atributo
+// Esta função está bastante hardcoded - objetivo é criar os buffers que armazenam a 
+// geometria de um cubo com textura
+// Apenas atributo coordenada nos vértices (x,y,z) + coord de textura (s,t)
 // A função retorna o identificador do VAO
 int setupGeometry()
 {
-	// Aqui setamos as coordenadas x, y e z do triângulo e as armazenamos de forma
-	// sequencial, já visando mandar para o VBO (Vertex Buffer Objects)
-	// Cada atributo do vértice (coordenada, cores, coordenadas de textura, normal, etc)
-	// Pode ser arazenado em um VBO único ou em VBOs separados
+	// Aqui montamos as 6 faces do cubo (36 vértices)
 	GLfloat vertices[] = {
+	    // face frontal
+	   -0.5f,-0.5f, 0.5f,  0.0f,0.0f,
+	    0.5f,-0.5f, 0.5f,  1.0f,0.0f,
+	    0.5f, 0.5f, 0.5f,  1.0f,1.0f,
+	   -0.5f,-0.5f, 0.5f,  0.0f,0.0f,
+	    0.5f, 0.5f, 0.5f,  1.0f,1.0f,
+	   -0.5f, 0.5f, 0.5f,  0.0f,1.0f,
 
+	   // face traseira
+	   -0.5f,-0.5f,-0.5f,  1.0f,0.0f,
+	    0.5f, 0.5f,-0.5f,  0.0f,1.0f,
+	    0.5f,-0.5f,-0.5f,  0.0f,0.0f,
+	   -0.5f,-0.5f,-0.5f,  1.0f,0.0f,
+	   -0.5f, 0.5f,-0.5f,  1.0f,1.0f,
+	    0.5f, 0.5f,-0.5f,  0.0f,1.0f,
 
-		-0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-		0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-		0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-		-0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-		0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-		-0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+	   // esquerda
+	   -0.5f,-0.5f,-0.5f,  0.0f,0.0f,
+	   -0.5f,-0.5f, 0.5f,  1.0f,0.0f,
+	   -0.5f, 0.5f, 0.5f,  1.0f,1.0f,
+	   -0.5f,-0.5f,-0.5f,  0.0f,0.0f,
+	   -0.5f, 0.5f, 0.5f,  1.0f,1.0f,
+	   -0.5f, 0.5f,-0.5f,  0.0f,1.0f,
 
-		-0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-		0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-		0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-		-0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-		-0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-		0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+	   // direita
+	    0.5f,-0.5f,-0.5f,  1.0f,0.0f,
+	    0.5f, 0.5f, 0.5f,  0.0f,1.0f,
+	    0.5f,-0.5f, 0.5f,  0.0f,0.0f,
+	    0.5f,-0.5f,-0.5f,  1.0f,0.0f,
+	    0.5f, 0.5f,-0.5f,  1.0f,1.0f,
+	    0.5f, 0.5f, 0.5f,  0.0f,1.0f,
 
-		-0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-		-0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-		-0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-		-0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-		-0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-		-0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
+	   // topo
+	   -0.5f, 0.5f,-0.5f,  0.0f,1.0f,
+	   -0.5f, 0.5f, 0.5f,  0.0f,0.0f,
+	    0.5f, 0.5f, 0.5f,  1.0f,0.0f,
+	   -0.5f, 0.5f,-0.5f,  0.0f,1.0f,
+	    0.5f, 0.5f, 0.5f,  1.0f,0.0f,
+	    0.5f, 0.5f,-0.5f,  1.0f,1.0f,
 
-		0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-		0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-		0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-		0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-		0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-		0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-
-		-0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-		-0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-		0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-		-0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-		0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-		0.5f,  0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-
-		-0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
-		0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-		-0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-		-0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
-		0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
-		0.5f, -0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
+	   // fundo (embaixo)
+	   -0.5f,-0.5f,-0.5f,  1.0f,1.0f,
+	    0.5f,-0.5f, 0.5f,  0.0f,0.0f,
+	   -0.5f,-0.5f, 0.5f,  1.0f,0.0f,
+	   -0.5f,-0.5f,-0.5f,  1.0f,1.0f,
+	    0.5f,-0.5f,-0.5f,  0.0f,1.0f,
+	    0.5f,-0.5f, 0.5f,  0.0f,0.0f
 	};
 
 	GLuint VBO, VAO;
@@ -386,43 +403,52 @@ int setupGeometry()
 	//Geração do identificador do VBO
 	glGenBuffers(1, &VBO);
 
-	//Faz a conexão (vincula) do buffer como um buffer de array
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-
-	//Envia os dados do array de floats para o buffer da OpenGl
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
 	//Geração do identificador do VAO (Vertex Array Object)
 	glGenVertexArrays(1, &VAO);
 
-	// Vincula (bind) o VAO primeiro, e em seguida  conecta e seta o(s) buffer(s) de vértices
-	// e os ponteiros para os atributos 
+	// Vincula e preenche os buffers
 	glBindVertexArray(VAO);
-	
-	//Para cada atributo do vertice, criamos um "AttribPointer" (ponteiro para o atributo), indicando: 
-	// Localização no shader * (a localização dos atributos devem ser correspondentes no layout especificado no vertex shader)
-	// Numero de valores que o atributo tem (por ex, 3 coordenadas xyz) 
-	// Tipo do dado
-	// Se está normalizado (entre zero e um)
-	// Tamanho em bytes 
-	// Deslocamento a partir do byte zero 
-	
-	//Atributo posição (x, y, z)
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)0);
-	glEnableVertexAttribArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-	//Atributo cor (r, g, b)
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*)(3*sizeof(GLfloat)));
+	// posição (layout = 0)
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (GLvoid*)0);
+	glEnableVertexAttribArray(0);
+	// texcoord (layout = 1)
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
 	glEnableVertexAttribArray(1);
 
-
-	// Observe que isso é permitido, a chamada para glVertexAttribPointer registrou o VBO como o objeto de buffer de vértice 
-	// atualmente vinculado - para que depois possamos desvincular com segurança
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-	// Desvincula o VAO (é uma boa prática desvincular qualquer buffer ou array para evitar bugs medonhos)
 	glBindVertexArray(0);
 
 	return VAO;
 }
 
+GLuint loadTexture(std::string filePath, int &width, int &height)
+{
+    GLuint texID;
+    glGenTextures(1, &texID);
+    glBindTexture(GL_TEXTURE_2D, texID);
+
+    // wrapping/filtering
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    int nrChannels;
+    unsigned char *data = stbi_load(filePath.c_str(), &width, &height, &nrChannels, 0);
+    if (data)
+    {
+        GLenum format = (nrChannels == 3) ? GL_RGB : GL_RGBA;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+    else
+    {
+        std::cout << "Failed to load texture: " << filePath << std::endl;
+    }
+    stbi_image_free(data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return texID;
+}
