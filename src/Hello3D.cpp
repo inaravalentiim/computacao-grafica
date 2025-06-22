@@ -26,38 +26,100 @@ using namespace std;
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-// Protótipo da função de callback de teclado
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
-
-// Protótipos das funções
 int setupShader();
 int setupGeometry();
 GLuint loadTexture(std::string filePath, int &width, int &height);
 
-// Dimensões da janela (pode ser alterado em tempo de execução)
 const GLuint WIDTH = 1000, HEIGHT = 1000;
 
-// Código fonte do Vertex Shader (em GLSL): ainda hardcoded
+class Camera
+{
+public:
+    glm::vec3 position;
+    glm::vec3 target;
+    float radius;
+    float yaw;
+    float pitch;
+
+    Camera(glm::vec3 focus = glm::vec3(0.0f, 0.0f, -3.0f), float startRadius = 6.0f, float startYaw = -90.0f, float startPitch = 0.0f)
+        : target(focus), radius(startRadius), yaw(startYaw), pitch(startPitch)
+    {
+        updatePosition();
+    }
+
+    glm::mat4 getViewMatrix()
+    {
+        return glm::lookAt(position, target, glm::vec3(0.0f, 1.0f, 0.0f));
+    }
+
+    void moveForward(float delta)
+    {
+        glm::vec3 front;
+        front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        front.y = sin(glm::radians(pitch));
+        front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        target += delta * glm::normalize(front);
+        updatePosition();
+    }
+
+    void moveRight(float delta)
+    {
+        glm::vec3 front;
+        front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        front.y = sin(glm::radians(pitch));
+        front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        glm::vec3 right = glm::normalize(glm::cross(glm::normalize(front), glm::vec3(0.0f, 1.0f, 0.0f)));
+        target += delta * right;
+        updatePosition();
+    }
+
+    void moveUp(float delta)
+    {
+        target.y += delta;
+        updatePosition();
+    }
+
+    void rotate(float deltaYaw, float deltaPitch)
+    {
+        yaw += deltaYaw;
+        pitch += deltaPitch;
+        if (pitch > 89.0f) pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+        updatePosition();
+    }
+
+private:
+    void updatePosition()
+    {
+        position.x = target.x + radius * cos(glm::radians(pitch)) * sin(glm::radians(yaw));
+        position.y = target.y + radius * sin(glm::radians(pitch));
+        position.z = target.z + radius * cos(glm::radians(pitch)) * cos(glm::radians(yaw));
+    }
+};
+
+Camera camera(glm::vec3(0.0f, 0.0f, -3.0f), 6.0f, -90.0f, 0.0f);
+
 const GLchar* vertexShaderSource = R"(
 	#version 450
 	layout(location = 0) in vec3 position;
 	layout(location = 1) in vec2 texc;
 	layout(location = 2) in vec3 normal;
 	uniform mat4 projection;
+	uniform mat4 view;
 	uniform mat4 model;
 	out vec2 texCoord;
 	out vec3 FragPos;
 	out vec3 Normal;
 	void main()
 	{
-		gl_Position = projection * model * vec4(position, 1.0);
+		gl_Position = projection * view * model * vec4(position, 1.0);
 		texCoord = texc;
 		FragPos  = vec3(model * vec4(position, 1.0));
 		Normal   = mat3(transpose(inverse(model))) * normal;
 	}
 	)";
 
-//Códifo fonte do Fragment Shader (em GLSL): ainda hardcoded
 const GLchar* fragmentShaderSource = R"(
 	#version 450
 	in vec2 texCoord;
@@ -71,18 +133,15 @@ const GLchar* fragmentShaderSource = R"(
 	void main()
 	{
 		vec3 ambient  = 0.2 * lightColor;
-
 		vec3 norm     = normalize(Normal);
 		vec3 lightDir = normalize(lightPos - FragPos);
 		float diff    = max(dot(norm, lightDir), 0.0);
 		vec3 diffuse  = diff * lightColor;
-
 		float shininess = 32.0;
 		vec3 viewDir = normalize(viewPos - FragPos);
 		vec3 reflectDir = reflect(-lightDir, norm);
 		float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);
 		vec3 specular = spec * lightColor;
-
 		vec3 phong = ambient + diffuse + specular;
 		vec4 texColor = texture(texBuff, texCoord);
 		color = vec4(phong, 1.0) * texColor;
@@ -93,40 +152,28 @@ bool rotateX=false, rotateY=false, rotateZ=false;
 int direction=1;
 float scale = 1.0f;
 
-// Função MAIN
 int main()
 {
-	// Inicialização da GLFW
 	glfwInit();
-
-	// Criação da janela GLFW
 	GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Ola 3D -- Inara!", nullptr, nullptr);
 	glfwMakeContextCurrent(window);
-
-	// Fazendo o registro da função de callback para a janela GLFW
 	glfwSetKeyCallback(window, key_callback);
 
-	// GLAD: carrega todos os ponteiros d funções da OpenGL
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
 	{
 		std::cout << "Failed to initialize GLAD" << std::endl;
 	}
 
-	// Obtendo as informações de versão
-	const GLubyte* renderer = glGetString(GL_RENDERER); /* get renderer string */
-	const GLubyte* version = glGetString(GL_VERSION); /* version as a string */
+	const GLubyte* renderer = glGetString(GL_RENDERER);
+	const GLubyte* version = glGetString(GL_VERSION);
 	cout << "Renderer: " << renderer << endl;
 	cout << "OpenGL version supported " << version << endl;
 
-	// Definindo as dimensões da viewport com as mesmas dimensões da janela da aplicação
 	int width, height;
 	glfwGetFramebufferSize(window, &width, &height);
 	glViewport(0, 0, width, height);
 
-	// Compilando e buildando o programa de shader
 	GLuint shaderID = setupShader();
-
-	// Gerando um buffer simples, com a geometria de um cubo
 	GLuint VAO = setupGeometry();
 
 	int imgWidth, imgHeight;
@@ -138,7 +185,11 @@ int main()
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textID);
 
-    GLint projLoc = glGetUniformLocation(shaderID, "projection");
+    GLint projLoc  = glGetUniformLocation(shaderID, "projection");
+    GLint viewLoc  = glGetUniformLocation(shaderID, "view");
+    GLint modelLoc = glGetUniformLocation(shaderID, "model");
+    GLint viewPosLoc = glGetUniformLocation(shaderID, "viewPos");
+
     glm::mat4 projection = glm::perspective(
         glm::radians(45.0f),
         (float)WIDTH / (float)HEIGHT,
@@ -146,77 +197,52 @@ int main()
     );
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
 
-	GLint modelLoc = glGetUniformLocation(shaderID, "model");
-
 	glm::vec3 lightPos  (3.0f, 3.0f, 3.0f);
 	glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
-	glm::vec3 viewPos   (0.0f, 0.0f, 0.0f);
 
 	glUniform3fv(glGetUniformLocation(shaderID, "lightPos"),  1, glm::value_ptr(lightPos));
 	glUniform3fv(glGetUniformLocation(shaderID, "lightColor"),1, glm::value_ptr(lightColor));
-	glUniform3fv(glGetUniformLocation(shaderID, "viewPos"),   1, glm::value_ptr(viewPos));
 
 	glEnable(GL_DEPTH_TEST);
 
 	while (!glfwWindowShouldClose(window))
 	{
 		glfwPollEvents();
-
 		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		glLineWidth(10);
-		glPointSize(20);
+		glm::mat4 view = camera.getViewMatrix();
+		glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+		glUniform3fv(viewPosLoc, 1, glm::value_ptr(camera.position));
 
-		float angle = (GLfloat)glfwGetTime();
+		float angle = (GLfloat)glfwGetTime() * direction;
 
 		glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, glm::vec3(0.0f, 0.0f, -3.0f));
 		model = glm::scale(model, glm::vec3(scale));
-		
-		if (rotateX && direction == 1)
+		if (rotateX)
 			model = glm::rotate(model, angle, glm::vec3(1.0f, 0.0f, 0.0f));
-		else if (rotateX && direction == -1)
-			model = glm::rotate(model, -angle, glm::vec3(1.0f, 0.0f, 0.0f));
-		else if (rotateY && direction == 1)
+		else if (rotateY)
 			model = glm::rotate(model, angle, glm::vec3(0.0f, 1.0f, 0.0f));
-		else if (rotateY && direction == -1)
-			model = glm::rotate(model, -angle, glm::vec3(0.0f, 1.0f, 0.0f));
-		else if (rotateZ && direction == 1)
+		else if (rotateZ)
 			model = glm::rotate(model, angle, glm::vec3(0.0f, 0.0f, 1.0f));
-		else if (rotateZ && direction == -1)
-			model = glm::rotate(model, -angle, glm::vec3(0.0f, 0.0f, 1.0f));
-
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-		
 		glBindVertexArray(VAO);
-		glBindTexture(GL_TEXTURE_2D, textID);
 		glDrawArrays(GL_TRIANGLES, 0, 36);
-		glDrawArrays(GL_POINTS,   0, 36);
 		glBindVertexArray(0);
 
 		glm::mat4 model2 = glm::mat4(1.0f);
 		model2 = glm::translate(model2, glm::vec3(1.5f, 0.0f, -3.0f));
 		model2 = glm::scale(model2, glm::vec3(scale));
-
-		if (rotateX && direction == 1)
-     		model2 = glm::rotate(model2, angle, glm::vec3(1.0f, 0.0f, 0.0f));
-		else if (rotateX && direction == -1)
-			model2 = glm::rotate(model2, -angle, glm::vec3(1.0f, 0.0f, 0.0f));
-		else if (rotateY && direction == 1)
+		if (rotateX)
+			model2 = glm::rotate(model2, angle, glm::vec3(1.0f, 0.0f, 0.0f));
+		else if (rotateY)
 			model2 = glm::rotate(model2, angle, glm::vec3(0.0f, 1.0f, 0.0f));
-		else if (rotateY && direction == -1)
-			model2 = glm::rotate(model2, -angle, glm::vec3(0.0f, 1.0f, 0.0f));
-		else if (rotateZ && direction == 1)
+		else if (rotateZ)
 			model2 = glm::rotate(model2, angle, glm::vec3(0.0f, 0.0f, 1.0f));
-		else if (rotateZ && direction == -1)
-			model2 = glm::rotate(model2, -angle, glm::vec3(0.0f, 0.0f, 1.0f));
-
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model2));
-
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLES, 0, 36);
-		glDrawArrays(GL_POINTS,   0, 36);
 		glBindVertexArray(0);
 
 		glfwSwapBuffers(window);
@@ -228,56 +254,54 @@ int main()
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
+	const float moveSpeed = 0.1f;
+	const float rotateSpeed = 2.0f;
+
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		glfwSetWindowShouldClose(window, GL_TRUE);
 
+	if (key == GLFW_KEY_UP && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.rotate(0.0f, rotateSpeed);
+	if (key == GLFW_KEY_DOWN && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.rotate(0.0f, -rotateSpeed);
+	if (key == GLFW_KEY_LEFT && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.rotate(-rotateSpeed, 0.0f);
+	if (key == GLFW_KEY_RIGHT && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.rotate(rotateSpeed, 0.0f);
+
+	if (key == GLFW_KEY_I && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.moveForward(moveSpeed);
+	if (key == GLFW_KEY_K && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.moveForward(-moveSpeed);
+	if (key == GLFW_KEY_L && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.moveRight(moveSpeed);
+	if (key == GLFW_KEY_J && (action == GLFW_PRESS || action == GLFW_REPEAT))
+		camera.moveRight(-moveSpeed);
+
 	if (key == GLFW_KEY_W && action == GLFW_PRESS)
 	{
-		rotateX = true;
-		rotateY = false;
-		rotateZ = false;
-		direction = -1;
+		rotateX = true; rotateY = false; rotateZ = false; direction = -1;
 	}
-
 	if (key == GLFW_KEY_A && action == GLFW_PRESS)
 	{
-		rotateX = false;
-		rotateY = true;
-		rotateZ = false;
-		direction = -1;
+		rotateX = false; rotateY = true; rotateZ = false; direction = -1;
 	}
-
 	if (key == GLFW_KEY_S && action == GLFW_PRESS)
 	{
-		rotateX = true;
-		rotateY = false;
-		rotateZ = false;
-		direction = 1;
+		rotateX = true; rotateY = false; rotateZ = false; direction = 1;
 	}
-
 	if (key == GLFW_KEY_D && action == GLFW_PRESS)
 	{
-		rotateX = false;
-		rotateY = true;
-		rotateZ = false;
-		direction = 1;
+		rotateX = false; rotateY = true; rotateZ = false; direction = 1;
 	}
-
 	if (key == GLFW_KEY_F && action == GLFW_PRESS)
 	{
-		rotateX = false;
-		rotateY = false;
-		rotateZ = true;
-		direction = 1;
+		rotateX = false; rotateY = false; rotateZ = true; direction = 1;
 	}
-
 	if (key == GLFW_KEY_G && action == GLFW_PRESS)
 	{
-		rotateX = false;
-		rotateY = false;
-		rotateZ = true;
-		direction = -1;
-	}	
+		rotateX = false; rotateY = false; rotateZ = true; direction = -1;
+	}
 
 	if (key == GLFW_KEY_E && action == GLFW_PRESS) {
 		scale += 0.1f;
@@ -329,53 +353,42 @@ int setupShader()
 int setupGeometry()
 {
 	GLfloat vertices[] = {
-	    // frente
-	   -0.5f,-0.5f, 0.5f,  0.0f,0.0f,  0.0f,0.0f,1.0f,
-	    0.5f,-0.5f, 0.5f,  1.0f,0.0f,  0.0f,0.0f,1.0f,
-	    0.5f, 0.5f, 0.5f,  1.0f,1.0f,  0.0f,0.0f,1.0f,
-	   -0.5f,-0.5f, 0.5f,  0.0f,0.0f,  0.0f,0.0f,1.0f,
-	    0.5f, 0.5f, 0.5f,  1.0f,1.0f,  0.0f,0.0f,1.0f,
-	   -0.5f, 0.5f, 0.5f,  0.0f,1.0f,  0.0f,0.0f,1.0f,
-
-	    // trás
-	   -0.5f,-0.5f,-0.5f,  1.0f,0.0f,  0.0f,0.0f,-1.0f,
-	    0.5f, 0.5f,-0.5f,  0.0f,1.0f,  0.0f,0.0f,-1.0f,
-	    0.5f,-0.5f,-0.5f,  0.0f,0.0f,  0.0f,0.0f,-1.0f,
-	   -0.5f,-0.5f,-0.5f,  1.0f,0.0f,  0.0f,0.0f,-1.0f,
-	   -0.5f, 0.5f,-0.5f,  1.0f,1.0f,  0.0f,0.0f,-1.0f,
-	    0.5f, 0.5f,-0.5f,  0.0f,1.0f,  0.0f,0.0f,-1.0f,
-
-	    // esquerda
-	   -0.5f,-0.5f,-0.5f,  0.0f,0.0f, -1.0f,0.0f,0.0f,
-	   -0.5f,-0.5f, 0.5f,  1.0f,0.0f, -1.0f,0.0f,0.0f,
-	   -0.5f, 0.5f, 0.5f,  1.0f,1.0f, -1.0f,0.0f,0.0f,
-	   -0.5f,-0.5f,-0.5f,  0.0f,0.0f, -1.0f,0.0f,0.0f,
-	   -0.5f, 0.5f, 0.5f,  1.0f,1.0f, -1.0f,0.0f,0.0f,
-	   -0.5f, 0.5f,-0.5f,  0.0f,1.0f, -1.0f,0.0f,0.0f,
-
-	    // direita
-	    0.5f,-0.5f,-0.5f,  1.0f,0.0f,  1.0f,0.0f,0.0f,
-	    0.5f, 0.5f, 0.5f,  0.0f,1.0f,  1.0f,0.0f,0.0f,
-	    0.5f,-0.5f, 0.5f,  0.0f,0.0f,  1.0f,0.0f,0.0f,
-	    0.5f,-0.5f,-0.5f,  1.0f,0.0f,  1.0f,0.0f,0.0f,
-	    0.5f, 0.5f,-0.5f,  1.0f,1.0f,  1.0f,0.0f,0.0f,
-	    0.5f, 0.5f, 0.5f,  0.0f,1.0f,  1.0f,0.0f,0.0f,
-
-	    // topo
-	   -0.5f, 0.5f,-0.5f,  0.0f,1.0f, 0.0f,1.0f,0.0f,
-	   -0.5f, 0.5f, 0.5f,  0.0f,0.0f, 0.0f,1.0f,0.0f,
-	    0.5f, 0.5f, 0.5f,  1.0f,0.0f, 0.0f,1.0f,0.0f,
-	   -0.5f, 0.5f,-0.5f,  0.0f,1.0f, 0.0f,1.0f,0.0f,
-	    0.5f, 0.5f, 0.5f,  1.0f,0.0f, 0.0f,1.0f,0.0f,
-	    0.5f, 0.5f,-0.5f,  1.0f,1.0f, 0.0f,1.0f,0.0f,
-
-	    // fundo
-	   -0.5f,-0.5f,-0.5f,  1.0f,1.0f, 0.0f,-1.0f,0.0f,
-	    0.5f,-0.5f, 0.5f,  0.0f,0.0f, 0.0f,-1.0f,0.0f,
-	   -0.5f,-0.5f, 0.5f,  1.0f,0.0f, 0.0f,-1.0f,0.0f,
-	   -0.5f,-0.5f,-0.5f,  1.0f,1.0f, 0.0f,-1.0f,0.0f,
-	    0.5f,-0.5f,-0.5f,  0.0f,1.0f, 0.0f,-1.0f,0.0f,
-	    0.5f,-0.5f, 0.5f,  0.0f,0.0f, 0.0f,-1.0f,0.0f
+	    -0.5f,-0.5f, 0.5f,  0.0f,0.0f,  0.0f,0.0f,1.0f,
+	     0.5f,-0.5f, 0.5f,  1.0f,0.0f,  0.0f,0.0f,1.0f,
+	     0.5f, 0.5f, 0.5f,  1.0f,1.0f,  0.0f,0.0f,1.0f,
+	    -0.5f,-0.5f, 0.5f,  0.0f,0.0f,  0.0f,0.0f,1.0f,
+	     0.5f, 0.5f, 0.5f,  1.0f,1.0f,  0.0f,0.0f,1.0f,
+	    -0.5f, 0.5f, 0.5f,  0.0f,1.0f,  0.0f,0.0f,1.0f,
+	    -0.5f,-0.5f,-0.5f,  1.0f,0.0f,  0.0f,0.0f,-1.0f,
+	     0.5f, 0.5f,-0.5f,  0.0f,1.0f,  0.0f,0.0f,-1.0f,
+	     0.5f,-0.5f,-0.5f,  0.0f,0.0f,  0.0f,0.0f,-1.0f,
+	    -0.5f,-0.5f,-0.5f,  1.0f,0.0f,  0.0f,0.0f,-1.0f,
+	    -0.5f, 0.5f,-0.5f,  1.0f,1.0f,  0.0f,0.0f,-1.0f,
+	     0.5f, 0.5f,-0.5f,  0.0f,1.0f,  0.0f,0.0f,-1.0f,
+	    -0.5f,-0.5f,-0.5f,  0.0f,0.0f, -1.0f,0.0f,0.0f,
+	    -0.5f,-0.5f, 0.5f,  1.0f,0.0f, -1.0f,0.0f,0.0f,
+	    -0.5f, 0.5f, 0.5f,  1.0f,1.0f, -1.0f,0.0f,0.0f,
+	    -0.5f,-0.5f,-0.5f,  0.0f,0.0f, -1.0f,0.0f,0.0f,
+	    -0.5f, 0.5f, 0.5f,  1.0f,1.0f, -1.0f,0.0f,0.0f,
+	    -0.5f, 0.5f,-0.5f,  0.0f,1.0f, -1.0f,0.0f,0.0f,
+	     0.5f,-0.5f,-0.5f,  1.0f,0.0f,  1.0f,0.0f,0.0f,
+	     0.5f, 0.5f, 0.5f,  0.0f,1.0f,  1.0f,0.0f,0.0f,
+	     0.5f,-0.5f, 0.5f,  0.0f,0.0f,  1.0f,0.0f,0.0f,
+	     0.5f,-0.5f,-0.5f,  1.0f,0.0f,  1.0f,0.0f,0.0f,
+	     0.5f, 0.5f,-0.5f,  1.0f,1.0f,  1.0f,0.0f,0.0f,
+	     0.5f, 0.5f, 0.5f,  0.0f,1.0f,  1.0f,0.0f,0.0f,
+	    -0.5f, 0.5f,-0.5f,  0.0f,1.0f, 0.0f,1.0f,0.0f,
+	    -0.5f, 0.5f, 0.5f,  0.0f,0.0f, 0.0f,1.0f,0.0f,
+	     0.5f, 0.5f, 0.5f,  1.0f,0.0f, 0.0f,1.0f,0.0f,
+	    -0.5f, 0.5f,-0.5f,  0.0f,1.0f, 0.0f,1.0f,0.0f,
+	     0.5f, 0.5f, 0.5f,  1.0f,0.0f, 0.0f,1.0f,0.0f,
+	     0.5f, 0.5f,-0.5f,  1.0f,1.0f, 0.0f,1.0f,0.0f,
+	    -0.5f,-0.5f,-0.5f,  1.0f,1.0f, 0.0f,-1.0f,0.0f,
+	     0.5f,-0.5f, 0.5f,  0.0f,0.0f, 0.0f,-1.0f,0.0f,
+	    -0.5f,-0.5f, 0.5f,  1.0f,0.0f, 0.0f,-1.0f,0.0f,
+	    -0.5f,-0.5f,-0.5f,  1.0f,1.0f, 0.0f,-1.0f,0.0f,
+	     0.5f,-0.5f,-0.5f,  0.0f,1.0f, 0.0f,-1.0f,0.0f,
+	     0.5f,-0.5f, 0.5f,  0.0f,0.0f, 0.0f,-1.0f,0.0f
 	};
 
 	GLuint VBO, VAO;
@@ -404,12 +417,10 @@ GLuint loadTexture(std::string filePath, int &width, int &height)
     GLuint texID;
     glGenTextures(1, &texID);
     glBindTexture(GL_TEXTURE_2D, texID);
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
     int nrChannels;
     unsigned char *data = stbi_load(filePath.c_str(), &width, &height, &nrChannels, 0);
     if (data)
