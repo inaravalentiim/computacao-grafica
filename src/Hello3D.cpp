@@ -9,6 +9,8 @@
 #include <iostream>
 #include <string>
 #include <assert.h>
+#include <vector>
+#include <fstream>
 
 using namespace std;
 
@@ -30,8 +32,31 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 int setupShader();
 int setupGeometry();
 GLuint loadTexture(std::string filePath, int &width, int &height);
+void loadTrajectoryPoints(std::vector<glm::vec3> &points, const std::string &filename);
+void saveTrajectoryPoints(const std::vector<glm::vec3> &points, const std::string &filename);
 
 const GLuint WIDTH = 1000, HEIGHT = 1000;
+
+std::vector<glm::vec3> trajectoryPoints1 = {
+    glm::vec3(0.0f, 0.0f, -3.0f),
+    glm::vec3(2.0f, 0.0f, -3.0f),
+    glm::vec3(2.0f, 2.0f, -3.0f),
+    glm::vec3(0.0f, 2.0f, -3.0f),
+    glm::vec3(0.0f, 0.0f, -3.0f)};
+size_t currentTargetIndex1 = 0;
+glm::vec3 cubePosition1 = trajectoryPoints1[0];
+
+std::vector<glm::vec3> trajectoryPoints2 = {
+    glm::vec3(1.5f, 0.0f, -3.0f),
+    glm::vec3(1.5f, -2.0f, -3.0f),
+    glm::vec3(-1.5f, -2.0f, -3.0f),
+    glm::vec3(-1.5f, 0.0f, -3.0f),
+    glm::vec3(1.5f, 0.0f, -3.0f)};
+size_t currentTargetIndex2 = 0;
+glm::vec3 cubePosition2 = trajectoryPoints2[0];
+
+float moveSpeed = 1.0f;
+int currentCube = 1;
 
 class Camera
 {
@@ -205,8 +230,30 @@ int main()
 
 	glEnable(GL_DEPTH_TEST);
 
+    float lastFrameTime = glfwGetTime();
+
 	while (!glfwWindowShouldClose(window))
 	{
+        float currentFrameTime = glfwGetTime();
+        float deltaTime = currentFrameTime - lastFrameTime;
+        lastFrameTime = currentFrameTime;
+
+        glm::vec3 target1 = trajectoryPoints1[currentTargetIndex1];
+        glm::vec3 dir1 = glm::normalize(target1 - cubePosition1);
+        float dist1 = glm::length(target1 - cubePosition1);
+        if(dist1 < 0.05f)
+            currentTargetIndex1 = (currentTargetIndex1 + 1) % trajectoryPoints1.size();
+        else
+            cubePosition1 += dir1 * moveSpeed * deltaTime;
+
+        glm::vec3 target2 = trajectoryPoints2[currentTargetIndex2];
+        glm::vec3 dir2 = glm::normalize(target2 - cubePosition2);
+        float dist2 = glm::length(target2 - cubePosition2);
+        if(dist2 < 0.05f)
+            currentTargetIndex2 = (currentTargetIndex2 + 1) % trajectoryPoints2.size();
+        else
+            cubePosition2 += dir2 * moveSpeed * deltaTime;
+
 		glfwPollEvents();
 		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -218,7 +265,7 @@ int main()
 		float angle = (GLfloat)glfwGetTime() * direction;
 
 		glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, glm::vec3(0.0f, 0.0f, -3.0f));
+        model = glm::translate(model, cubePosition1);
 		model = glm::scale(model, glm::vec3(scale));
 		if (rotateX)
 			model = glm::rotate(model, angle, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -232,7 +279,7 @@ int main()
 		glBindVertexArray(0);
 
 		glm::mat4 model2 = glm::mat4(1.0f);
-		model2 = glm::translate(model2, glm::vec3(1.5f, 0.0f, -3.0f));
+		model2 = glm::translate(model2, cubePosition2);
 		model2 = glm::scale(model2, glm::vec3(scale));
 		if (rotateX)
 			model2 = glm::rotate(model2, angle, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -311,6 +358,27 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		if (scale < 0.1f)
 			scale = 0.1f;
 	}
+
+    if(action == GLFW_PRESS)
+    {
+        if(key == GLFW_KEY_1) currentCube = 1;
+        else if(key == GLFW_KEY_2) currentCube = 2;
+
+        std::string basePath = "trajectories/";
+
+        if(key == GLFW_KEY_P)
+        {
+            std::string filename = basePath + "traj_cubo" + std::to_string(currentCube) + ".txt";
+            if(currentCube == 1) saveTrajectoryPoints(trajectoryPoints1, filename);
+            else if(currentCube == 2) saveTrajectoryPoints(trajectoryPoints2, filename);
+        }
+        else if(key == GLFW_KEY_O)
+        {
+            std::string filename = basePath + "traj_cubo" + std::to_string(currentCube) + ".txt";
+            if(currentCube == 1) { loadTrajectoryPoints(trajectoryPoints1, filename); currentTargetIndex1 = 0; }
+            else if(currentCube == 2) { loadTrajectoryPoints(trajectoryPoints2, filename); currentTargetIndex2 = 0; }
+        }
+    }
 }
 
 int setupShader()
@@ -436,4 +504,22 @@ GLuint loadTexture(std::string filePath, int &width, int &height)
     stbi_image_free(data);
     glBindTexture(GL_TEXTURE_2D, 0);
     return texID;
+}
+
+void loadTrajectoryPoints(std::vector<glm::vec3> &points, const std::string &filename)
+{
+    std::ifstream inFile(filename);
+    if(!inFile.is_open()) return;
+    points.clear();
+    glm::vec3 p;
+    while(inFile >> p.x >> p.y >> p.z) points.push_back(p);
+    inFile.close();
+}
+
+void saveTrajectoryPoints(const std::vector<glm::vec3> &points, const std::string &filename)
+{
+    std::ofstream outFile(filename);
+    if(!outFile.is_open()) return;
+    for(const auto &p : points) outFile << p.x << ' ' << p.y << ' ' << p.z << '\n';
+    outFile.close();
 }
